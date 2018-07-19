@@ -7,6 +7,8 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
+import dask.array as da
+
 GridParameters = namedtuple('GridParameters',
                             ['sigma', 'grid_min', 'grid_max'])
 
@@ -146,7 +148,7 @@ def parse_bias(filename='plumed.dat', bias_type=None):
     return bias_args
 
 
-def sum_hills(grid_points, hill_centers, sigma, periodic=False):
+def sum_hills(grid_points, hill_centers, weights, sigma, periodic=False):
     """
     Helper function for building static bias functions for
     SamplingProject and derived classes.
@@ -168,6 +170,10 @@ def sum_hills(grid_points, hill_centers, sigma, periodic=False):
     bias_grid : ndarray
         Value of bias contributed by each hill at each grid point.
     """
+    hill_centers = da.from_array(hill_centers,
+                                 chunks=round(len(hill_centers)/100))
+    weights = da.from_array(weights, chunks=round(len(hill_centers)/100))
+
     dist_from_center = grid_points - hill_centers
     square = dist_from_center * dist_from_center
 
@@ -176,12 +182,12 @@ def sum_hills(grid_points, hill_centers, sigma, periodic=False):
         neg_dist = (np.abs(dist_from_center)
                     - (grid_points[-1] - grid_points[0]))
         neg_square = neg_dist * neg_dist
-        square = np.minimum(square, neg_square)
+        square = da.minimum(square, neg_square)
 
-    bias_grid = np.exp(
-        -square / (2 * sigma * sigma)
-    )
-    return bias_grid
+    hill_values = da.exp(-square / (2 * sigma * sigma))
+    bias_grid = da.sum(weights * hill_values, axis=0)
+
+    return bias_grid.compute()
 
 
 def load_project(colvar='COLVAR', hills='HILLS', method=None, **kwargs):
@@ -608,7 +614,7 @@ class PBMetaDProject(SamplingProject):
                   and 'grid_spacing' not in self.bias_params.keys()):
                 n_bins = get_float(self.bias_params['grid_bin'][idx])
 
-            grid = np.linspace(grid_min, grid_max, num=n_bins)
+            grid = np.linspace(grid_min, grid_max, num=int(n_bins))
             s_i = self.hills[CV][CV].values
             w_i = self.hills[CV]['height'].values
 
@@ -616,8 +622,7 @@ class PBMetaDProject(SamplingProject):
             s_i = s_i.reshape(len(s_i), 1)
             w_i = w_i.reshape(len(w_i), 1)
 
-            hill_values = sum_hills(grid, s_i, sigma, periodic)
-            bias_potential = sum(w_i * hill_values)
+            bias_potential = sum_hills(grid, s_i, w_i, sigma, periodic)
 
             self.static_bias[CV] = pd.Series(bias_potential,
                                              index=grid)
