@@ -48,7 +48,7 @@ def read_colvar(filename='COLVAR', multi=0, unbiased=False):
             colvar_paths.append(replica_path)
 
     with open(colvar_paths[0], 'r') as f:
-        header = f.readline().strip().split(" ")[2:]
+        header = f.readline().strip().split()[2:]
 
     frames = []
     for path in colvar_paths:
@@ -271,18 +271,7 @@ class SamplingProject:
         if not input_file:
             return
         # if input file supplied, grab arguments from bias section
-        self.bias_params = parse_bias(input_file, bias_type)
-        self.biased_CVs = {CV: GridParameters(
-            sigma=get_float(self.bias_params['sigma'][idx]),
-            grid_min=get_float(self.bias_params['grid_min'][idx]),
-            grid_max=get_float(self.bias_params['grid_max'][idx])
-        )
-            for idx, CV in enumerate(self.bias_params['arg'])
-        }
-        self.periodic_CVs = [CV for CV in self.biased_CVs
-                             if self.biased_CVs[CV].grid_max == np.pi]
-        if 'temp' in self.bias_params.keys():
-            self.temp = get_float(self.bias_params['temp'][0])
+        self.get_bias_params(input_file, bias_type)
 
     def get_bias_params(self, input_file, bias_type):
         """
